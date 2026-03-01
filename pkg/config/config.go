@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 
 	"github.com/caarlos0/env/v11"
@@ -722,6 +723,24 @@ func (c *Config) GetModelConfig(modelName string) (*ModelConfig, error) {
 	}
 	if len(matches) == 1 {
 		return &matches[0], nil
+	}
+
+	// Prefer OAuth/token-backed entries when duplicate model_name is present.
+	// This avoids random round-robin selecting a plain API-key entry with empty key
+	// when OAuth is configured for the same alias.
+	authMatches := make([]ModelConfig, 0, len(matches))
+	for i := range matches {
+		method := strings.ToLower(strings.TrimSpace(matches[i].AuthMethod))
+		if method == "oauth" || method == "token" {
+			authMatches = append(authMatches, matches[i])
+		}
+	}
+	if len(authMatches) == 1 {
+		return &authMatches[0], nil
+	}
+	if len(authMatches) > 1 {
+		idx := rrCounter.Add(1) % uint64(len(authMatches))
+		return &authMatches[idx], nil
 	}
 
 	// Multiple configs - use round-robin for load balancing
